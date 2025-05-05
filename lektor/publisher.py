@@ -638,6 +638,40 @@ class FtpPublisher(Publisher):
 class FtpTlsPublisher(FtpPublisher):
     connection_class = FtpTlsConnection
 
+# ----------------- S3 Publisher Class -----------------
+
+class S3Publisher(Publisher):
+    def publish(
+        self,
+        target_url: str,
+        credentials: Mapping[str, str] | None = None,
+        **extra: Any,
+    ) -> Iterator[str]:
+        credentials = credentials or {}
+        url = urlsplit(target_url)
+        bucket_name = url.hostname
+        prefix = url.path.lstrip("/")
+        region = credentials.get("region", "us-east-1")
+
+        if not bucket_name:
+            self.fail("S3 bucket name not specified in target URL.")
+
+        s3_client = boto3.client(
+            "s3",
+            aws_access_key_id=credentials.get("aws_access_key_id"),
+            aws_secret_access_key=credentials.get("aws_secret_access_key"),
+            region_name=region,
+        )
+
+        for root, _, files in os.walk(self.output_path):
+            for file in files:
+                full_path = os.path.join(root, file)
+                rel_path = os.path.relpath(full_path, self.output_path)
+                s3_key = posixpath.join(prefix, rel_path).replace(os.sep, "/")
+
+                yield f"Uploading: {rel_path} -> s3://{bucket_name}/{s3_key}"
+                s3_client.upload_file(full_path, bucket_name, s3_key)
+
 
 class GitRepo(AbstractContextManager["GitRepo"]):
     """A temporary git repository.
@@ -919,6 +953,7 @@ builtin_publishers = {
     "ghpages": GithubPagesPublisher,
     "ghpages+https": GithubPagesPublisher,
     "ghpages+ssh": GithubPagesPublisher,
+    "s3": S3Publisher
 }
 
 
