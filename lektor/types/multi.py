@@ -87,19 +87,12 @@ class ChoiceSource:
 
         for item in iterable or ():
             key = self.item_key.evaluate(pad, this=item, alt=alt, values=values)
-
-            # If there is a label expression, use it.  Since in that case
-            # we only have one language to fill in, we fill it in for the
-            # default language
             if self.item_label is not None:
                 label = {
                     "en": self.item_label.evaluate(
                         pad, this=item, alt=alt, values=values
                     )
                 }
-
-            # Otherwise we create a proper internationalized key out of
-            # our target label
             else:
                 if isinstance(item, (tuple, list)) and len(item) == 2:
                     label = item[1]
@@ -143,3 +136,25 @@ class CheckboxesType(MultiType):
         if rv == [""]:
             rv = []
         return rv
+
+
+# 🔍 New Class Extension: ChoiceMetadataLogger
+class ChoiceMetadataLogger:
+    def __init__(self, choice_source):
+        self.choice_source = choice_source
+
+    def count_choices(self, pad, record=None, alt=PRIMARY_ALT):
+        return len(list(self.choice_source.iter_choices(pad, record, alt)))
+
+    def list_languages(self, pad, record=None, alt=PRIMARY_ALT):
+        languages = set()
+        for _, label_dict in self.choice_source.iter_choices(pad, record, alt):
+            languages.update(label_dict.keys())
+        return list(languages)
+
+    def describe_choices(self, pad, record=None, alt=PRIMARY_ALT):
+        lines = []
+        for key, label_dict in self.choice_source.iter_choices(pad, record, alt):
+            langs = ", ".join(f"{lang}: {label}" for lang, label in label_dict.items())
+            lines.append(f"{key} => {langs}")
+        return "\n".join(lines)
