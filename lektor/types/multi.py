@@ -1,5 +1,4 @@
 import traceback
-
 from lektor.constants import PRIMARY_ALT
 from lektor.environment.expressions import Expression
 from lektor.environment.expressions import FormatExpression
@@ -50,79 +49,54 @@ def _parse_choices(options):
     return rv
 
 
-class ChoiceSource:
-    def __init__(self, env, options):
-        source = options.get("source")
-        if source is not None:
-            self.source = Expression(env, source)
-            self.choices = None
-            item_key = options.get("item_key") or "{{ this._id }}"
-            item_label = options.get("item_label")
-        else:
-            self.source = None
-            self.choices = _parse_choices(options)
-            item_key = options.get("item_key") or "{{ this.0 }}"
-            item_label = options.get("item_label")
-        self.item_key = FormatExpression(env, item_key)
-        if item_label is not None:
-            item_label = FormatExpression(env, item_label)
-        self.item_label = item_label
+class MultiType(Type):
+    def _init_(self, env, options):
+        Type._init_(self, env, options)
 
-    @property
-    def has_choices(self):
-        return self.source is not None or self.choices is not None
+        # Removing the need for Strategy Pattern here by collapsing the
+        # previously used ChoiceSource-based logic directly into MultiType
+        self.static_choices = options.get("choices")
+        self.source = options.get("source")
+
+        # Directly using the fields instead of delegating to other classes
+        self.item_key = FormatExpression(env, options.get("item_key") or "{{ this._id }}")
+        item_label = options.get("item_label")
+        self.item_label = FormatExpression(env, item_label) if item_label else None
 
     def iter_choices(self, pad, record=None, alt=PRIMARY_ALT):
         values = {}
         if record is not None:
             values["record"] = record
-        if self.choices is not None:
-            iterable = self.choices
-        else:
+        if self.static_choices:
+            # Static choices (from "choices" field)
+            iterable = self.static_choices.split(",")
+        elif self.source:
+            # Dynamic choices (from the "source" expression)
             try:
                 iterable = self.source.evaluate(pad, alt=alt, values=values)
             except Exception:
                 traceback.print_exc()
-                iterable = ()
+                iterable = []
 
-        for item in iterable or ():
+        else:
+            iterable = []
+
+        for item in iterable:
             key = self.item_key.evaluate(pad, this=item, alt=alt, values=values)
-
-            # If there is a label expression, use it.  Since in that case
-            # we only have one language to fill in, we fill it in for the
-            # default language
-            if self.item_label is not None:
-                label = {
-                    "en": self.item_label.evaluate(
-                        pad, this=item, alt=alt, values=values
-                    )
-                }
-
-            # Otherwise we create a proper internationalized key out of
-            # our target label
+            if self.item_label:
+                label = {"en": self.item_label.evaluate(pad, this=item, alt=alt, values=values)}
             else:
-                if isinstance(item, (tuple, list)) and len(item) == 2:
-                    label = item[1]
-                elif hasattr(item, "get_record_label_i18n"):
-                    label = item.get_record_label_i18n()
-                else:
-                    label = {"en": item["_id"]}
+                label = {"en": item}
 
             yield key, label
 
-
-class MultiType(Type):
-    def __init__(self, env, options):
-        Type.__init__(self, env, options)
-        self.source = ChoiceSource(env, options)
-
     def get_labels(self, pad, record=None, alt=PRIMARY_ALT):
-        return dict(self.source.iter_choices(pad, record, alt))
+        return dict(self.iter_choices(pad, record, alt))
 
     def to_json(self, pad, record=None, alt=PRIMARY_ALT):
         rv = Type.to_json(self, pad, record, alt)
-        if self.source.has_choices:
-            rv["choices"] = list(self.source.iter_choices(pad, record, alt))
+        if self.static_choices or self.source:
+            rv["choices"] = list(self.iter_choices(pad, record, alt))
         return rv
 
 
