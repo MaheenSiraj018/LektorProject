@@ -1,4 +1,4 @@
-from __future__ import annotations
+from _future_ import annotations
 
 import fnmatch
 import os
@@ -39,26 +39,6 @@ if TYPE_CHECKING:
 
 
 def _prevent_inlining(wrapped):
-    """Ensure wrapped jinja filter does not get inlined by the template compiler.
-
-    The jinja compiler normally assumes that filters are pure functions (whose
-    result depends only on their parameters) and will inline filter calls that
-    are applied to compile-time constants.
-
-    E.g.
-
-        'say {{ "foo" | upper }}'
-
-    will be compiled to
-
-        "say Foo"
-
-    Many of our filters depend on global state (e..g the Lektor build context).
-
-    Applying this decorator to them will ensure they are not inlined.
-    """
-
-    # the use of @pass_context will prevent inlining
     @jinja2.pass_context
     def wrapper(_jinja_ctx, *args, **kwargs):
         return wrapped(*args, **kwargs)
@@ -67,33 +47,9 @@ def _prevent_inlining(wrapped):
 
 
 def _dates_filter(name, wrapped):
-    """Wrap one of the babel.dates.format_* functions for use as a jinja filter.
-
-    This will create a jinja filter that will:
-
-    - Check for *undefined* date/time input (and, in that case, return an empty string).
-
-    - Check that the ``format`` and ``locale`` parameters, if provided, have the correct
-      types, otherwise raising ``TypeError``.
-
-    - Raise ``TypeError`` with a somewhat informative message if the wrapped formatting
-      function raises an unexpected exception.  Such an exception is most likely due to
-      being passed an unsupported date/time time.  (The Babel formatting functions
-      accept a fairly wide range of input types — and that range might potentially vary
-      between releases — so we do not explicitly check the input type before passing it
-      on to Babel.)
-
-    If `locale` is not specified, we fill it in based on the current *alt*.
-
-    """
-
     @_prevent_inlining
     def wrapper(arg, format="medium", **kwargs):
         if isinstance(arg, jinja2.Undefined):
-            # This will typically return an empty string, though it depends on the
-            # specific type of undefined instance.  E.g. if arg is a DebugUndefined, it
-            # will return a more descriptive message, and if arg is a StrictUndefined,
-            # an UndefinedError will be raised.
             return str(arg)
 
         if not isinstance(format, str):
@@ -125,7 +81,6 @@ def _markdown_filter(
     resolve_links: Literal["always", "never", "when-possible", None] = None,
     **kw: str,
 ) -> Markdown:
-    """A jinja filter that converts markdown text to HTML."""
     ctx = get_ctx()
     source_obj = ctx.source if ctx is not None else None
     return Markdown(
@@ -133,17 +88,9 @@ def _markdown_filter(
     )
 
 
-# Special files that should always be ignored.
-IGNORED_FILES = ["thumbs.db", "desktop.ini", "Icon\r"]
-
-# These files are important for artifacts and must not be ignored when
-# they are built even though they start with dots.
+IGNORED_FILES = ["thumbs.db", "desktop.ini", "Icon\\r"]
 SPECIAL_ARTIFACTS = [".htaccess", ".htpasswd"]
-
-# Default glob pattern of ignored files.
-EXCLUDED_ASSETS = ["_*", ".*"]
-
-# Default glob pattern of included files (higher-priority than EXCLUDED_ASSETS).
+EXCLUDED_ASSETS = ["_", "."]
 INCLUDED_ASSETS = []
 
 
@@ -151,7 +98,6 @@ def any_fnmatch(filename, patterns):
     for pat in patterns:
         if fnmatch.fnmatch(filename, pat):
             return True
-
     return False
 
 
@@ -171,10 +117,6 @@ class CustomJinjaEnvironment(jinja2.Environment):
             raise
         except jinja2.TemplateNotFound as e:
             if ctx is not None:
-                # If we can't find the template we want to record at what
-                # possible locations the template could exist.  This will help
-                # out watcher to pick up templates that will appear in the
-                # future.  This assumes the loader is a file system loader.
                 for template_name in e.templates:
                     pieces = split_template_path(template_name)
                     for base in self.loader.searchpath:
@@ -190,7 +132,7 @@ def lookup_from_bag(jinja_ctx, *args):
 
 
 class Environment:
-    def __init__(self, project, load_plugins=True, extra_flags=None):
+    def _init_(self, project, load_plugins=True, extra_flags=None):
         self.project = project
         self.root_path = os.path.abspath(project.tree)
 
@@ -200,7 +142,6 @@ class Environment:
         ]
 
         if not self.theme_paths:
-            # load the directories in the themes directory as the themes
             try:
                 for fname in os.listdir(os.path.join(self.root_path, "themes")):
                     f = os.path.join(self.root_path, "themes", fname)
@@ -220,7 +161,7 @@ class Environment:
             loader=jinja2.FileSystemLoader(template_paths),
         )
 
-        from lektor.db import F, get_alts  # pylint: disable=import-outside-toplevel
+        from lektor.db import F, get_alts
 
         def latlongformat(latlong, secs=True):
             lat, lon = latlong
@@ -250,16 +191,10 @@ class Environment:
             timeformat=_dates_filter("timeformat", babel.dates.format_time),
         )
 
-        # pylint: disable=import-outside-toplevel
         from lektor.types import builtin_types
 
         self.types = builtin_types.copy()
-
         self.publishers = builtin_publishers.copy()
-
-        # The plugins that are loaded for this environment.  This is
-        # modified by the plugin controller and registry methods on the
-        # environment.
         self.plugin_controller = PluginController(self, extra_flags)
         self.plugins = {}
         self.plugin_ids_by_class = {}
@@ -272,15 +207,9 @@ class Environment:
 
         if load_plugins:
             self.load_plugins()
-        # pylint: disable=import-outside-toplevel
+
         from lektor.db import siblings_resolver
-
         self.virtualpathresolver("siblings")(siblings_resolver)
-
-    root_path: str
-    build_programs: list[tuple[type[SourceObject], type[BuildProgram]]]
-    special_file_assets: dict[str, type[Asset]]
-    special_file_suffixes: dict[str, str]
 
     @property
     def asset_path(self):
@@ -291,37 +220,28 @@ class Environment:
         return os.path.join(self.root_path, "temp")
 
     def load_plugins(self):
-        """Loads the plugins."""
         load_packages(self)
         initialize_plugins(self)
 
     def load_config(self):
-        """Loads the current config."""
         return Config(self.project.project_file)
 
     def new_pad(self):
-        """Convenience function to create a database and pad."""
-        from lektor.db import Database  # pylint: disable=import-outside-toplevel
-
+        from lektor.db import Database
         return Database(self).new_pad()
 
     def is_uninteresting_source_name(self, filename: str) -> bool:
-        """These files are ignored when sources are built into artifacts."""
         fn = filename.lower()
         if fn in SPECIAL_ARTIFACTS:
             return False
 
         proj = self.project
         if any_fnmatch(filename, INCLUDED_ASSETS + proj.included_assets):
-            # Included by the user's project config, thus not uninteresting.
             return False
         return any_fnmatch(filename, EXCLUDED_ASSETS + proj.excluded_assets)
 
     @staticmethod
     def is_ignored_artifact(asset_name):
-        """This is used by the prune tool to figure out which files in the
-        artifact folder should be ignored.
-        """
         fn = asset_name.lower()
         if fn in SPECIAL_ARTIFACTS:
             return False
@@ -336,9 +256,6 @@ class Environment:
     ):
         values = dict(values or ())
 
-        # If not provided, pick the alt from the provided "this" object.
-        # As there is no mandatory format for it, we make sure that we can
-        # deal with a bad attribute there.
         if alt is None:
             if this is not None:
                 alt = getattr(this, "alt", None)
@@ -347,8 +264,6 @@ class Environment:
             if alt is None:
                 alt = PRIMARY_ALT
 
-        # This is already a global variable but we can inject it as a
-        # local override if available.
         if pad is None:
             ctx = get_ctx()
             if ctx is not None:
@@ -376,8 +291,6 @@ class Environment:
             if rv is not None:
                 return rv
         return None
-
-    # -- methods for the plugin system
 
     def add_build_program(
         self, cls: type[SourceObject], program: type[BuildProgram]
@@ -410,7 +323,6 @@ class Environment:
                 raise RuntimeError('Prefix "%s" is already registered.' % prefix)
             self.virtual_sources[prefix] = func
             return func
-
         return decorator
 
     def urlresolver(self, func):
@@ -420,3 +332,16 @@ class Environment:
     def generator(self, func):
         self.custom_generators.append(func)
         return func
+
+    def describe_project_structure(self) -> str:
+        lines = []
+        lines.append(f"Root Path: {self.root_path}")
+        lines.append(f"Assets Path: {self.asset_path}")
+        lines.append(f"Temp Path: {self.temp_path}")
+        lines.append("Theme Paths:")
+        for path in self.theme_paths:
+            lines.append(f"  - {path}")
+        lines.append("Template Search Paths:")
+        for path in self.jinja_env.loader.searchpath:
+            lines.append(f"  - {path}")
+        return "\\n".join(lines)
